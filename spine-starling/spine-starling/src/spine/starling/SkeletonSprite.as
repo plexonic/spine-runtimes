@@ -57,18 +57,18 @@ package spine.starling {
 	public class SkeletonSprite extends DisplayObject {
 		static private var _tempPoint : Point = new Point();
 		static private var _tempMatrix : Matrix = new Matrix();
-		static private var _tempVertices : Vector.<Number> = new Vector.<Number>(8);
-		static internal var blendModes : Vector.<String> = new <String>[BlendMode.NORMAL, BlendMode.ADD, BlendMode.MULTIPLY, BlendMode.SCREEN];
+		protected static var _tempVertices : Vector.<Number> = new Vector.<Number>(8);
+        protected static var blendModes : Vector.<String> = new <String>[BlendMode.NORMAL, BlendMode.ADD, BlendMode.MULTIPLY, BlendMode.SCREEN];
 		private var _skeleton : Skeleton;
 		public var batchable : Boolean = true;
 		private var _smoothing : String = "bilinear";
-		private static var clipper: SkeletonClipping = new SkeletonClipping();
-		private static var QUAD_INDICES : Vector.<uint> = new <uint>[0, 1, 2, 2, 3, 0];
+		protected static var clipper: SkeletonClipping = new SkeletonClipping();
+		protected static var QUAD_INDICES : Vector.<uint> = new <uint>[0, 1, 2, 2, 3, 0];
 		
 		public var vertexEffect : VertexEffect;
-		private var tempLight : spine.Color = new spine.Color(0, 0, 0);
-		private var tempDark : spine.Color = new spine.Color(0, 0, 0);
-		private var tempVertex : spine.Vertex = new spine.Vertex();
+		protected var tempLight : spine.Color = new spine.Color(0, 0, 0);
+		protected var tempDark : spine.Color = new spine.Color(0, 0, 0);
+		protected var tempVertex : spine.Vertex = new spine.Vertex();
 
 		public function SkeletonSprite(skeletonData : SkeletonData) {
 			Bone.yDown = true;
@@ -112,7 +112,7 @@ package spine.starling {
 							region.rendererObject = mesh = new SkeletonMesh(Image(region.rendererObject).texture);
 						if (region.rendererObject is AtlasRegion)
 							region.rendererObject = mesh = new SkeletonMesh(Image(AtlasRegion(region.rendererObject).rendererObject).texture);						
-						mesh.setStyle(new TwoColorMeshStyle());					
+						mesh.setStyle(new TwoColorMeshStyle());
 						indexData = mesh.getIndexData();
 						for (ii = 0; ii < indices.length; ii++)
 							indexData.setIndex(ii, indices[ii]);
@@ -198,7 +198,7 @@ package spine.starling {
 						tempVertex.dark.setFromColor(tempDark);
 						vertexEffect.transform(tempVertex);
 						vertexData.colorize("color", Color.rgb(tempVertex.light.r * 255, tempVertex.light.g * 255, tempVertex.light.b * 255), tempVertex.light.a, ii, 1);
-						vertexData.colorize("color2", Color.rgb(tempVertex.dark.r * 255, tempVertex.dark.g * 255, tempVertex.dark.b * 255), a, ii, 1);						
+						vertexData.colorize("color2", Color.rgb(tempVertex.dark.r * 255, tempVertex.dark.g * 255, tempVertex.dark.b * 255), a, ii, 1);
 						mesh.setVertexPosition(ii, tempVertex.x, tempVertex.y);
 						mesh.setTexCoords(ii, tempVertex.u, tempVertex.v);
 					}
