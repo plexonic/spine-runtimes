@@ -132,7 +132,8 @@ package spine.animation {
 
 			// Require mixTime > 0 to ensure the mixing from entry was applied at least once.
 			if (to.mixTime > 0 && (to.mixTime >= to.mixDuration || to.timeScale == 0)) {
-				if (from.totalAlpha == 0) {
+				// Require totalAlpha == 0 to ensure mixing is complete, unless mixDuration == 0 (the transition is a single frame).
+				if (from.totalAlpha == 0 || to.mixDuration == 0) {
 					to.mixingFrom = from.mixingFrom;
 					to.interruptAlpha = from.interruptAlpha;
 					queue.end(from);					
@@ -206,9 +207,10 @@ package spine.animation {
 			if (from.mixingFrom != null) applyMixingFrom(from, skeleton, currentPose);
 
 			var mix : Number = 0;
-			if (to.mixDuration == 0) // Single frame mix to undo mixingFrom changes.
+			if (to.mixDuration == 0) { // Single frame mix to undo mixingFrom changes.
 				mix = 1;
-			else {
+				currentPose = MixPose.setup;
+			} else {
 				mix = to.mixTime / to.mixDuration;
 				if (mix > 1) mix = 1;
 			}
@@ -347,12 +349,15 @@ package spine.animation {
 				if (event.time < trackLastWrapped) break;
 				if (event.time > animationEnd) continue; // Discard events outside animation start/end.
 				queue.event(entry, event);
-			}
-
+			}			
+			
 			// Queue complete if completed a loop iteration or the animation.
-			if (entry.loop ? (trackLastWrapped > entry.trackTime % duration) : (animationTime >= animationEnd && entry.animationLast < animationEnd)) {
-				queue.complete(entry);
-			}
+			var complete:Boolean;
+			if (entry.loop)
+				complete = duration == 0 || trackLastWrapped > entry.trackTime % duration;
+			else
+				complete = animationTime >= animationEnd && entry.animationLast < animationEnd;
+			if (complete) queue.complete(entry);
 
 			// Queue events after complete.
 			for (; i < n; i++) {
@@ -466,9 +471,12 @@ package spine.animation {
 				last.next = entry;
 				if (delay <= 0) {
 					var duration : Number = last.animationEnd - last.animationStart;
-					if (duration != 0)
-						delay += duration * (1 + (int)(last.trackTime / duration)) - data.getMix(last.animation, animation);
-					else
+					if (duration != 0) {
+						if (last.loop)
+						    delay += duration * (1 + (int)(last.trackTime / duration));
+						else
+						    delay += duration;						
+					} else
 						delay = 0;
 				}
 			}

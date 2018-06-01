@@ -8,10 +8,12 @@
   * Removed `RegionAttachment.vertices` field. The vertices array is provided to `RegionAttachment.computeWorldVertices` by the API user now.
   * Removed `RegionAttachment.updateWorldVertices`, added `RegionAttachment.computeWorldVertices`. The new method now computes the x/y positions of the 4 vertices of the corner and places them in the provided `worldVertices` array, starting at `offset`, then moving by `stride` array elements when advancing to the next vertex. This allows to directly compose the vertex buffer and avoids a copy. The computation of the full vertices, including vertex colors and texture coordinates, is now done by the backend's respective renderer.
   * Replaced `r`, `g`, `b`, `a` fields with instances of new `Color` class in `RegionAttachment`, `MeshAttachment`, `Skeleton`, `SkeletonData`, `Slot` and `SlotData`.
+  * The completion event will fire for looped 0 duration animations every frame.
+
  * **Additions**
   * Added `Skeleton.getBounds` from reference implementation.
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
-  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).    
+  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
   * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.
   * Added `PointAttachment`, additional method `newPointAttachment` in `AttachmentLoader` interface.
   * Added `ClippingAttachment`, additional method `newClippingAttachment` in `AttachmentLoader` interface.
@@ -25,6 +27,8 @@
  * Added support for clipping.
  * Added support for rotated regions in texture atlas loaded via StarlingAtlasAttachmentLoader.
  * Added support for vertex effects. See `RaptorExample.as`
+ * Added 'getTexture()' method to 'StarlingTextureAtlasAttachmentLoader'
+ * Breaking change: if a skeleton requires two color tinting, you have to enable it via `SkeletonSprite.twoColorTint = true`. In this case the skeleton will use the `TwoColorMeshStyle`, which internally uses a different vertex layout and shader. This means that skeletons with two color tinting enabled will break batching and hence increase the number of draw calls in your app.
 
 ## C
  * **Breaking changes**
@@ -35,11 +39,13 @@
   * Removed `spBone_worldToLocalRotationX` and `spBone_worldToLocalRotationY`. Replaced by `spBone_worldToLocalRotation` (rotation given relative to x-axis, counter-clockwise, in degrees).
   * Replaced `r`, `g`, `b`, `a` fields with instances of new `spColor` struct in `spRegionAttachment`, `spMeshAttachment`, `spSkeleton`, `spSkeletonData`, `spSlot` and `spSlotData`.
   * Removed `spVertexIndex`from public API.
+  * Listeners on `spAnimationState` or `spTrackEntry` will now be also called in case a track entry is disposed as part of dispoing the `spAnimationState`.
+  * The completion event will fire for looped 0 duration animations every frame.
  * **Additions**
-  * Added support for local and relative transform constraint calculation, including additional fields in `spTransformConstraintData`.  
+  * Added support for local and relative transform constraint calculation, including additional fields in `spTransformConstraintData`.
   * Added `spPointAttachment`, additional method `spAtlasAttachmentLoadeR_newPointAttachment`.
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
-  * Added `spBone_localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).  	
+  * Added `spBone_localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
    * Added two color tinting support, including `spTwoColorTimeline` and additional fields on `spSlot` and `spSlotData`.
   * Added `userData` field to `spTrackEntry`, so users can expose data in `spAnimationState` callbacks.
   * Modified kvec.h used by SkeletonBinary.c to use Spine's MALLOC/FREE macros. That way there's only one place to inject custom allocators ([extension.h](https://github.com/EsotericSoftware/spine-runtimes/blob/master/spine-c/spine-c/include/spine/extension.h)) [commit](https://github.com/EsotericSoftware/spine-runtimes/commit/c2cfbc6cb8709daa082726222d558188d75a004f)
@@ -50,6 +56,7 @@
   * `Animation#apply` and `Timeline#apply`` now take enums `MixPose` and `MixDirection` instead of booleans
   * Added `spVertexEffect` and corresponding implementations `spJitterVertexEffect` and `spSwirlVertexEffect`. Create/dispose through the corresponding `spXXXVertexEffect_create()/dispose()` functions. Set on framework/engine specific renderer. See changes for spine-c based frameworks/engines below.
   * Functions in `extension.h` are not prefixed with `_sp` instead of just `_` to avoid interference with other libraries.
+  * Introduced `SP_API` macro. Every spine-c function is prefixed with this macro. By default, it is an empty string. Can be used to markup spine-c functions with e.g. ``__declspec` when compiling to a dll or linking to that dll.
 
 ### Cocos2d-X
  * Fixed renderer to work with 3.6 changes
@@ -60,6 +67,9 @@
  * Added support for clipping.
  * SkeletonRenderer now combines the displayed color of the Node (cascaded from all parents) with the skeleton color for tinting.
  * Added support for vertex effects. See `RaptorExample.cpp`.
+ * Added ETC1 alpha support, thanks @halx99! Does not work when two color tint is enabled.
+ * Added `spAtlasPage_setCustomTextureLoader()` which let's you do texture loading manually. Thanks @jareguo.
+ * Added `SkeletonRenderer:setSlotsRange()` and `SkeletonRenderer::createWithSkeleton()`. This allows you to split rendering of a skeleton up into multiple parts, and render other nodes in between. See `SkeletonRendererSeparatorExample.cpp` for an example.
 
 ### Cocos2d-Objc
  * Fixed renderer to work with 3.6 changes
@@ -70,6 +80,7 @@
  * Fixed renderer to work with 3.6 changes. Sadly, two color tinting does not work, as the vertex format in SFML is fixed.
  * Added support for clipping.
  * Added support for vertex effects. See raptor example.
+ * Added premultiplied alpha support to `SkeletonDrawable`.
 
 ### Unreal Engine 4
  * Fixed renderer to work with 3.6 changes
@@ -78,6 +89,8 @@
  * Switched from built-in ProceduralMeshComponent to RuntimeMeshComponent by Koderz (https://github.com/Koderz/UE4RuntimeMeshComponent, MIT). Needed for more flexibility regarding vertex format, should not have an impact on existing code/assets. You need to copy the RuntimeMeshComponentPlugin from our repository in `spine-ue4\Plugins\` to your project as well!
  * Added support for two color tinting. All base materials, e.g. SpineUnlitNormalMaterial, now do proper two color tinting. No material parameters have changed.
  * Updated to Unreal Engine 4.16.1. Note that 4.16 has a regression which will make it impossible to compile plain .c files!
+ * spine-c is now exposed from the plugin shared library on Windows via __declspec.
+ * Updated to Unreal Engine 4.18
 
 ## C#
 * **Breaking changes**
@@ -87,10 +100,12 @@
   * Added `stride` parameter to `VertexAttachment.ComputeWorldVertices`.
   * Removed `RegionAttachment.Vertices` field. The vertices array is provided to `RegionAttachment.ComputeWorldVertices` by the API user now.
   * Removed `RegionAttachment.UpdateWorldVertices`, added `RegionAttachment.ComputeWorldVertices`. The new method now computes the x/y positions of the 4 vertices of the corner and places them in the provided `worldVertices` array, starting at `offset`, then moving by `stride` array elements when advancing to the next vertex. This allows to directly compose the vertex buffer and avoids a copy. The computation of the full vertices, including vertex colors and texture coordinates, is now done by the backend's respective renderer.
- * **Additions**  
+  * The completion event will fire for looped 0 duration animations every frame.
+
+ * **Additions**
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
-  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).  
-  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.  
+  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
+  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.
   * Added `PointAttachment`, additional method `NewPointAttachment` in `AttachmentLoader` interface.
   * Added `ClippingAttachment`, additional method `NewClippingAttachment` in `AttachmentLoader` interface.
   * Added `SkeletonClipper` and `Triangulator`, used to implement software clipping of attachments.
@@ -102,10 +117,10 @@
    * **Two color tinting** is currently supported via extra UV2 and UV3 mesh vertex streams. To use Two color tinting, you need to:
      * switch on "Tint Black" under "Advanced...",
      * use the new `Spine/Skeleton Tint Black` shader, or your own shader that treats the UV2 and UV3 streams similarly.
-     * Additionally, for SkeletonGraphic, you can use `Spine/SkeletonGraphic Tint Black` (or the bundled SkeletonGraphicTintBlack material) or your own shader that uses UV2 and UV3 streams similarly. **Additional Shader Channels** TexCoord1 and TexCoord2 will need to be enabled from the Canvas component's inspector. These correspond to UV2 and UV3. 
+     * Additionally, for SkeletonGraphic, you can use `Spine/SkeletonGraphic Tint Black` (or the bundled SkeletonGraphicTintBlack material) or your own shader that uses UV2 and UV3 streams similarly. **Additional Shader Channels** TexCoord1 and TexCoord2 will need to be enabled from the Canvas component's inspector. These correspond to UV2 and UV3.
    * **Clipping** is now supported. Caution: The SkeletonAnimation switches to slightly slower mesh generation code when clipping so limit your use of `ClippingAttachment`s when using on large numbers of skeletons.
- * **SkeletonRenderer.initialFlip** Spine components such as SkeletonRenderer, SkeletonAnimation, SkeletonAnimator now has `initialFlipX` and `initialFlipY` fields which are also visible in the inspector under "Advanced...". It will allow you to set and preview a starting flip value for your skeleton component. This is applied immediately when the internal skeleton object is instantiated. 
- * **[SpineAttribute] Improvements** 
+ * **SkeletonRenderer.initialFlip** Spine components such as SkeletonRenderer, SkeletonAnimation, SkeletonAnimator now has `initialFlipX` and `initialFlipY` fields which are also visible in the inspector under "Advanced...". It will allow you to set and preview a starting flip value for your skeleton component. This is applied immediately when the internal skeleton object is instantiated.
+ * **[SpineAttribute] Improvements**
    * **Icons have been added to SpineAttributeDrawers**. This should make your default inspectors easier to understand at a glance.
    * **Added Constraint Attributes** You can now use `[SpineIkConstraint]` `[SpineTransformConstraint]` `[SpinePathConstraint]`
    * **SpineAttribute dataField** parameter can also now detect sibling fields within arrays and serializable structs/classes.
@@ -119,12 +134,12 @@
  * **SkeletonRenderer.OnPostProcessVertices** is a new callback that gives you a reference to the MeshGenerator after it has generated a mesh from the current skeleton pose. You can access `meshGenerator.VertexBuffer` or `meshGenerator.ColorBuffer` to modify these before they get pushed into the UnityEngine.Mesh for rendering. This can be useful for non-shader vertex effects.
  * **Examples**
    * **Examples now use properties**. The code in the example scripts have been switched over to using properties instead of fields to encourage their use for consistency. This is in anticipation of both users who want to move the Spine folders to the Unity Plugins folder (compiled as a different assembly), and of Unity 2017's ability to manually define different assemblies for shorter compilation times.
-   * **Mix And Match**. The mix-and-match example scene, code and data have been updated to reflect the current recommended setup for animation-compatible custom equip systems The underlying API has changed since 3.5 and the new API calls in MixAndMatch.cs is recommended. Documentation is in progress.  
+   * **Mix And Match**. The mix-and-match example scene, code and data have been updated to reflect the current recommended setup for animation-compatible custom equip systems The underlying API has changed since 3.5 and the new API calls in MixAndMatch.cs is recommended. Documentation is in progress.
    * **Sample Components**. `AtasRegionAttacher` and `SpriteAttacher` are now part of `Sample Components`, to reflect that they are meant to be used as sample code rather than production. A few other sample components have also been added. New imports of the unitypackage Examples folder will see a "Legacy" folder comprised of old sample components that no longer contain the most up-to-date and recommended workflows, but are kept in case old setups used them for production.
  * **Spine folder**. In the unitypackage, the "spine-csharp" and "spine-unity" folders are now inside a "Spine" folder. This change will only affect fresh imports. Importing the unitypackage to update Spine-Unity in your existing project will update the appropriate files however you chose to arrange them, as long as the meta files are intact.
  * **Breaking changes**
    * The Sprite shaders module was updated to the latest version from the [source](https://github.com/traggett/UnitySpriteShaders/commits/master). Some changes were made to the underlying keyword structure. You may need to review the settings of your lit materials. Particularly, your Fixed Normals settings.
-   * The `Spine/Skeleton Lit` shader was switched over to non-fixed-function code. It now no longer requires mesh normals and has fixed normals at the shader level. 
+   * The `Spine/Skeleton Lit` shader was switched over to non-fixed-function code. It now no longer requires mesh normals and has fixed normals at the shader level.
    * The old MeshGenerator classes, interfaces and code in `Spine.Unity.MeshGeneration` are now deprecated. All mesh-generating components now share the class `Spine.Unity.MeshGenerator` defined in `SpineMesh.cs`. MeshGenerator is a serializable class.
      * The `SkeletonRenderer.renderMeshes` optimization is currently non-functional.
      * Old triangle-winding code has been removed from `SkeletonRenderer`. Please use shaders that have backface culling off.
@@ -140,7 +155,9 @@
  * Removed `RegionBatcher` and `SkeletonRegionRenderer`, renamed `SkeletonMeshRenderer` to `SkeletonRenderer`
  * Added support for two color tint. For it to work, you need to add the `SpineEffect.fx` file to your content project, then load it via `var effect = Content.Load<Effect>("SpineEffect");`, and set it on the `SkeletonRenderer`. See the example project for code.
  * Added support for any `Effect` to be used by `SkeletonRenderer`
+ * Added support for `IVertexEffect` to modify vertices of skeletons on the CPU. `IVertexEffect` instances can be set on the `SkeletonRenderer`. See example project.
  * Added `SkeletonDebugRenderer`
+ * Made `MeshBatcher` of SkeletonRenderer accessible via a getter. Allows user to batch their own geometry together with skeleton meshes for maximum batching instead of using XNA SpriteBatcher.
 
 ## Java
  * **Breaking changes**
@@ -149,10 +166,14 @@
   * Added `stride` parameter to `VertexAttachment.computeWorldVertices`.
   * Removed `RegionAttachment.vertices` field. The vertices array is provided to `RegionAttachment.computeWorldVertices` by the API user now.
   * Removed `RegionAttachment.updateWorldVertices`, added `RegionAttachment.computeWorldVertices`. The new method now computes the x/y positions of the 4 vertices of the corner and places them in the provided `worldVertices` array, starting at `offset`, then moving by `stride` array elements when advancing to the next vertex. This allows to directly compose the vertex buffer and avoids a copy. The computation of the full vertices, including vertex colors and texture coordinates, is now done by the backend's respective renderer.
- * **Additions**  
+  * Skeleton attachments: Moved update of attached skeleton out of libGDX `SkeletonRenderer`, added overloaded method `Skeleton#updateWorldTransform(Bone), used for `SkeletonAttachment`. You now MUST call this new method
+  with the bone of the parent skeleton to which the child skeleton is attached. See `SkeletonAttachmentTest` for and example.
+  * The completion event will fire for looped 0 duration animations every frame.
+
+ * **Additions**
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
-  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).  
-  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.  
+  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
+  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.
   * Added `PointAttachment`, additional method `newPointAttachment` in `AttachmentLoader` interface.
   * Added `ClippingAttachment`, additional method `newClippingAttachment` in `AttachmentLoader` interface.
   * Added `SkeletonClipper` and `Triangulator`, used to implement software clipping of attachments.
@@ -172,10 +193,11 @@
   * Removed `RegionAttachment:updateWorldVertices`, added `RegionAttachment:computeWorldVertices`, which takes offsets and stride to allow compositing vertices directly in a vertex buffer to be send to the GPU. The compositing is now performed in the backends' respective renderers.
   * Removed `MeshAttachment.worldVertices` field. Computation is now performed in each backends' respective renderer. The `uv` coordinates are now stored in `MeshAttachment.uvs`.
   * Removed `RegionAttachment.vertices` field. Computation is now performed in each backends respective renderer. The `uv` coordinates for each vertex are now stored in the `RegionAttachment.uvs` field.
+  * The completion event will fire for looped 0 duration animations every frame.
  * **Additions**
   * Added `Bone:localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
   * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.
-  * Added `PointAttachment`, additional method `newPointAttachment` in `AttachmentLoader` interface.  
+  * Added `PointAttachment`, additional method `newPointAttachment` in `AttachmentLoader` interface.
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
   * Added `ClippingAttachment`, additional method `newClippingAttachment` in `AttachmentLoader` interface.
   * Added `SkeletonClipper` and `Triangulator`, used to implement software clipping of attachments.
@@ -201,15 +223,18 @@
   * Removed `VertexAttachment.computeWorldVertices` overload, changed `VertexAttachment.computeWorldVerticesWith` to `VertexAttachment.computeWorldVertices`, added `stride` parameter.
   * Removed `RegionAttachment.vertices` field. The vertices array is provided to `RegionAttachment.computeWorldVertices` by the API user now.
   * Removed `RegionAttachment.updateWorldVertices`, added `RegionAttachment.computeWorldVertices`. The new method now computes the x/y positions of the 4 vertices of the corner and places them in the provided `worldVertices` array, starting at `offset`, then moving by `stride` array elements when advancing to the next vertex. This allows to directly compose the vertex buffer and avoids a copy. The computation of the full vertices, including vertex colors and texture coordinates, is now done by the backend's respective renderer.
- * **Additions**  
+  * The completion event will fire for looped 0 duration animations every frame.
+
+ * **Additions**
   * Added support for local and relative transform constraint calculation, including additional fields in `TransformConstraintData`
-  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).  
-  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.  
+  * Added `Bone.localToWorldRotation`(rotation given relative to x-axis, counter-clockwise, in degrees).
+  * Added two color tinting support, including `TwoColorTimeline` and additional fields on `Slot` and `SlotData`.
   * Added `PointAttachment`, additional method `newPointAttachment` in `AttachmentLoader` interface.
   * Added `ClippingAttachment`, additional method `newClippingAttachment` in `AttachmentLoader` interface.
   * Added `SkeletonClipper` and `Triangulator`, used to implement software clipping of attachments.
   * `AnimationState#apply` returns boolean indicating if any timeline was applied or not.
   * `Animation#apply` and `Timeline#apply`` now take enums `MixPose` and `MixDirection` instead of booleans
+  * Added `AssetManager.loadTextureAtlas`. Instead of loading the `.atlas` and corresponding image files manually, you can simply specify the location of the `.atlas` file and AssetManager will load the atlas and all its images automatically. `AssetManager.get("atlasname.atlas")` will then return an instance of `spine.TextureAtlas`.
 
 
 ### WebGL backend
@@ -227,6 +252,7 @@
  * Added two color tinting support, enabled by default. You can disable it via the constructors of `SceneRenderer`, `SkeletonRenderer`and `PolygonBatcher`. Note that you will need to use a shader created via `Shader.newTwoColoredTexturedShader` shader with `SkeletonRenderer` and `PolygonBatcher` if two color tinting is enabled.
  * Added clipping support
  * Added `VertexEffect` interface, instances of which can be set on `SkeletonRenderer`. Allows to modify vertices before submitting them to GPU. See `SwirlEffect`, `JitterEffect`, and the example which allows to set effects.
+ * Added `slotRangeStart` and `slotRangeEnd` parameters to `SkeletonRenderer#draw` and `SceneRenderer#drawSkeleton`. This allows you to render only a range of slots in the draw order. See `spine-ts/webgl/tests/test-slot-range.html` for an example.
 
 ### Canvas backend
  * Fixed renderer to work for 3.6 changes. Sadly, we can't support two color tinting via the Canvas API.
@@ -237,6 +263,7 @@
  * Fixed renderer to work with 3.6 changes. Two color tinting is not supported.
  * Added clipping support
  * Added `VertexEffect` interface, instances of which can be set on `SkeletonMesh`. Allows to modify vertices before submitting them to GPU. See `SwirlEffect`, `JitterEffect`.
+ * Added support for multi-page atlases
 
 ### Widget backend
  * Fixed WebGL context loss (see WebGL backend changes). Enabled automatically.

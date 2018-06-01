@@ -346,7 +346,8 @@ function AnimationState:updateMixingFrom (to, delta)
 	
 	-- Require mixTime > 0 to ensure the mixing from entry was applied at least once.
 	if (to.mixTime > 0 and (to.mixTime >= to.mixDuration or to.timeScale == 0)) then
-		if (from.totalAlpha == 0) then
+		-- Require totalAlpha == 0 to ensure mixing is complete, unless mixDuration == 0 (the transition is a single frame).
+		if (from.totalAlpha == 0 or to.mixDuration == 0) then
 			to.mixingFrom = from.mixingFrom
 			to.interruptAlpha = from.interruptAlpha
 			self.queue:_end(from)
@@ -427,6 +428,7 @@ function AnimationState:applyMixingFrom (to, skeleton, currentPose)
 	local mix = 0
 	if to.mixDuration == 0 then -- Single frame mix to undo mixingFrom changes.
 		mix = 1
+    currentPose = MixPose.setup
 	else
 		mix = to.mixTime / to.mixDuration
 		if mix > 1 then mix = 1 end
@@ -583,7 +585,7 @@ function AnimationState:queueEvents (entry, animationTime)
   -- Queue complete if completed a loop iteration or the animation.
   local queueComplete = false
   if entry.loop then 
-    queueComplete = (trackLastWrapped > entry.trackTime % duration)
+    queueComplete = duration == 0 or (trackLastWrapped > entry.trackTime % duration)
   else
     queueComplete = (animationTime >= animationEnd and entry.animationLast < animationEnd)
   end
@@ -718,7 +720,12 @@ function AnimationState:addAnimation (trackIndex, animation, loop, delay)
     if delay <= 0 then
       local duration = last.animationEnd - last.animationStart
       if duration ~= 0 then
-        delay = delay + duration * (1 + math_floor(last.trackTime / duration)) - data:getMix(last.animation, animation)
+				if last.loop then
+					delay = delay + duration * (1 + math_floor(last.trackTime / duration))
+				else
+					delay = delay + duration
+				end
+        delay = delay - data:getMix(last.animation, animation)
       else
         delay = 0
       end

@@ -116,7 +116,8 @@ module spine {
 
 			// Require mixTime > 0 to ensure the mixing from entry was applied at least once.
 			if (to.mixTime > 0 && (to.mixTime >= to.mixDuration || to.timeScale == 0)) {
-				if (from.totalAlpha == 0) {
+				// Require totalAlpha == 0 to ensure mixing is complete, unless mixDuration == 0 (the transition is a single frame).
+				if (from.totalAlpha == 0 || to.mixDuration == 0) {
 					to.mixingFrom = from.mixingFrom;
 					to.interruptAlpha = from.interruptAlpha;
 					this.queue.end(from);
@@ -171,8 +172,11 @@ module spine {
 						let pose = timelineData[ii] >= AnimationState.FIRST ? MixPose.setup : currentPose;
 						if (timeline instanceof RotateTimeline) {
 							this.applyRotateTimeline(timeline, skeleton, animationTime, mix, pose, timelinesRotation, ii << 1, firstFrame);
-						} else
+						} else {
+							// This fixes the WebKit 602 specific issue described at http://esotericsoftware.com/forum/iOS-10-disappearing-graphics-10109
+							Utils.webkit602BugfixHelper(mix, pose);
 							timeline.apply(skeleton, animationLast, animationTime, events, mix, pose, MixDirection.in);
+						}
 					}
 				}
 				this.queueEvents(current, animationTime);
@@ -190,9 +194,10 @@ module spine {
 			if (from.mixingFrom != null) this.applyMixingFrom(from, skeleton, currentPose);
 
 			let mix = 0;
-			if (to.mixDuration == 0) // Single frame mix to undo mixingFrom changes.
+			if (to.mixDuration == 0) { // Single frame mix to undo mixingFrom changes.
 				mix = 1;
-			else {
+				currentPose = MixPose.setup;
+			} else {
 				mix = to.mixTime / to.mixDuration;
 				if (mix > 1) mix = 1;
 			}
@@ -240,6 +245,8 @@ module spine {
 				if (timeline instanceof RotateTimeline)
 					this.applyRotateTimeline(timeline, skeleton, animationTime, alpha, pose, timelinesRotation, i << 1, firstFrame);
 				else {
+					// This fixes the WebKit 602 specific issue described at http://esotericsoftware.com/forum/iOS-10-disappearing-graphics-10109
+					Utils.webkit602BugfixHelper(alpha, pose);
 					timeline.apply(skeleton, animationLast, animationTime, events, alpha, pose, MixDirection.out);
 				}
 			}
@@ -334,10 +341,12 @@ module spine {
 			}
 
 			// Queue complete if completed a loop iteration or the animation.
-			if (entry.loop ? (trackLastWrapped > entry.trackTime % duration)
-				: (animationTime >= animationEnd && entry.animationLast < animationEnd)) {
-				this.queue.complete(entry);
-			}
+			var complete = false;
+			if (entry.loop)
+				complete = duration == 0 || trackLastWrapped > entry.trackTime % duration;
+			else
+				complete = animationTime >= animationEnd && entry.animationLast < animationEnd;
+			if (complete) this.queue.complete(entry);
 
 			// Queue events after complete.
 			for (; i < n; i++) {
@@ -451,9 +460,13 @@ module spine {
 				last.next = entry;
 				if (delay <= 0) {
 					let duration = last.animationEnd - last.animationStart;
-					if (duration != 0)
-						delay += duration * (1 + ((last.trackTime / duration) | 0)) - this.data.getMix(last.animation, animation);
-					else
+					if (duration != 0) {
+						if (last.loop)
+							delay += duration * (1 + ((last.trackTime / duration) | 0));
+						else
+							delay += duration;
+						delay -= this.data.getMix(last.animation, animation);
+					} else
 						delay = 0;
 				}
 			}

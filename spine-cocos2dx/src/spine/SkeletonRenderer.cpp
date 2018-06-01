@@ -36,12 +36,41 @@
 #include <spine/Cocos2dAttachmentLoader.h>
 #include <algorithm>
 
+#define INITIAL_WORLD_VERTICES_LENGTH 1000
+// Used for transforming attachments for bounding boxes & debug rendering
+static float* worldVertices = nullptr;
+static size_t worldVerticesLength = 0;
+
+void ensureWorldVerticesCapacity(size_t capacity) {
+	if (worldVerticesLength < capacity) {
+		float* newWorldVertices = new float[capacity];
+		memcpy(newWorldVertices, worldVertices, capacity * sizeof(float));
+		delete[] worldVertices;
+		worldVertices = newWorldVertices;
+		worldVerticesLength = capacity;
+	}
+}
+
 USING_NS_CC;
 using std::min;
 using std::max;
 
 namespace spine {
 
+void SkeletonRenderer::destroyScratchBuffers() {
+	if (worldVertices) {
+		delete[] worldVertices;
+		worldVertices = nullptr;
+		worldVerticesLength = 0;
+	}
+}
+
+SkeletonRenderer* SkeletonRenderer::createWithSkeleton(spSkeleton* skeleton, bool ownsSkeleton, bool ownsSkeletonData) {
+	SkeletonRenderer* node = new SkeletonRenderer(skeleton, ownsSkeleton, ownsSkeletonData);
+	node->autorelease();
+	return node;
+}
+	
 SkeletonRenderer* SkeletonRenderer::createWithData (spSkeletonData* skeletonData, bool ownsSkeletonData) {
 	SkeletonRenderer* node = new SkeletonRenderer(skeletonData, ownsSkeletonData);
 	node->autorelease();
@@ -61,14 +90,52 @@ SkeletonRenderer* SkeletonRenderer::createWithFile (const std::string& skeletonD
 }
 
 void SkeletonRenderer::initialize () {
-	_worldVertices = new float[1000]; // Max number of vertices per mesh.
+	if (!worldVertices) {
+		worldVertices = new float[INITIAL_WORLD_VERTICES_LENGTH];
+		worldVerticesLength = INITIAL_WORLD_VERTICES_LENGTH;
+	}
 	
 	_clipper = spSkeletonClipping_create();
 
 	_blendFunc = BlendFunc::ALPHA_PREMULTIPLIED;
 	setOpacityModifyRGB(true);
 
-	setGLProgramState(GLProgramState::getOrCreateWithGLProgramName(GLProgram::SHADER_NAME_POSITION_TEXTURE_COLOR_NO_MVP));
+	setupGLProgramState(false);
+	
+	spSkeleton_setToSetupPose(_skeleton);
+	spSkeleton_updateWorldTransform(_skeleton);
+}
+	
+void SkeletonRenderer::setupGLProgramState (bool twoColorTintEnabled) {
+	if (twoColorTintEnabled) {
+		setGLProgramState(SkeletonTwoColorBatch::getInstance()->getTwoColorTintProgramState());
+		return;
+	}
+	
+	Texture2D *texture = nullptr;
+	for (int i = 0, n = _skeleton->slotsCount; i < n; i++) {
+		spSlot* slot = _skeleton->drawOrder[i];
+		if (!slot->attachment) continue;
+		switch (slot->attachment->type) {
+			case SP_ATTACHMENT_REGION: {
+				spRegionAttachment* attachment = (spRegionAttachment*)slot->attachment;
+				texture = static_cast<AttachmentVertices*>(attachment->rendererObject)->_texture;
+				break;
+			}
+			case SP_ATTACHMENT_MESH: {
+				spMeshAttachment* attachment = (spMeshAttachment*)slot->attachment;
+				texture = static_cast<AttachmentVertices*>(attachment->rendererObject)->_texture;
+				break;
+			}
+			default:
+				continue;
+		}
+		
+		if (texture != nullptr) {
+			break;
+		}
+	}
+	setGLProgramState(GLProgramState::getOrCreateWithGLProgramName(GLProgram::SHADER_NAME_POSITION_TEXTURE_COLOR_NO_MVP, texture));
 }
 
 void SkeletonRenderer::setSkeletonData (spSkeletonData *skeletonData, bool ownsSkeletonData) {
@@ -77,36 +144,48 @@ void SkeletonRenderer::setSkeletonData (spSkeletonData *skeletonData, bool ownsS
 }
 
 SkeletonRenderer::SkeletonRenderer ()
-	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr) {
+	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr), _startSlotIndex(-1), _endSlotIndex(-1) {
+}
+	
+SkeletonRenderer::SkeletonRenderer(spSkeleton* skeleton, bool ownsSkeleton, bool ownsSkeletonData)
+	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr), _startSlotIndex(-1), _endSlotIndex(-1) {
+	initWithSkeleton(skeleton, ownsSkeleton, ownsSkeletonData);
 }
 
 SkeletonRenderer::SkeletonRenderer (spSkeletonData *skeletonData, bool ownsSkeletonData)
-	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr) {
+	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr), _startSlotIndex(-1), _endSlotIndex(-1) {
 	initWithData(skeletonData, ownsSkeletonData);
 }
 
 SkeletonRenderer::SkeletonRenderer (const std::string& skeletonDataFile, spAtlas* atlas, float scale)
-	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr) {
+	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr), _startSlotIndex(-1), _endSlotIndex(-1) {
 	initWithJsonFile(skeletonDataFile, atlas, scale);
 }
 
 SkeletonRenderer::SkeletonRenderer (const std::string& skeletonDataFile, const std::string& atlasFile, float scale)
-	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr) {
+	: _atlas(nullptr), _attachmentLoader(nullptr), _debugSlots(false), _debugBones(false), _debugMeshes(false), _timeScale(1), _effect(nullptr), _startSlotIndex(-1), _endSlotIndex(-1) {
 	initWithJsonFile(skeletonDataFile, atlasFile, scale);
 }
 
 SkeletonRenderer::~SkeletonRenderer () {
 	if (_ownsSkeletonData) spSkeletonData_dispose(_skeleton->data);
-	spSkeleton_dispose(_skeleton);
+	if (_ownsSkeleton) spSkeleton_dispose(_skeleton);
 	if (_atlas) spAtlas_dispose(_atlas);
-	if (_attachmentLoader) spAttachmentLoader_dispose(_attachmentLoader);
-	delete [] _worldVertices;
+	if (_attachmentLoader) spAttachmentLoader_dispose(_attachmentLoader);	
 	spSkeletonClipping_dispose(_clipper);
 }
 
+void SkeletonRenderer::initWithSkeleton(spSkeleton* skeleton, bool ownsSkeleton, bool ownsSkeletonData) {
+	_skeleton = skeleton;
+	_ownsSkeleton = ownsSkeleton;
+	_ownsSkeletonData = ownsSkeletonData;
+	
+	initialize();
+}
+	
 void SkeletonRenderer::initWithData (spSkeletonData* skeletonData, bool ownsSkeletonData) {
+	_ownsSkeleton = true;
 	setSkeletonData(skeletonData, ownsSkeletonData);
-
 	initialize();
 }
 
@@ -120,6 +199,7 @@ void SkeletonRenderer::initWithJsonFile (const std::string& skeletonDataFile, sp
 	CCASSERT(skeletonData, json->error ? json->error : "Error reading skeleton data.");
 	spSkeletonJson_dispose(json);
 
+	_ownsSkeleton = true;
 	setSkeletonData(skeletonData, true);
 
 	initialize();
@@ -137,6 +217,7 @@ void SkeletonRenderer::initWithJsonFile (const std::string& skeletonDataFile, co
 	CCASSERT(skeletonData, json->error ? json->error : "Error reading skeleton data file.");
 	spSkeletonJson_dispose(json);
 
+	_ownsSkeleton = true;
 	setSkeletonData(skeletonData, true);
 
 	initialize();
@@ -151,7 +232,7 @@ void SkeletonRenderer::initWithBinaryFile (const std::string& skeletonDataFile, 
     spSkeletonData* skeletonData = spSkeletonBinary_readSkeletonDataFile(binary, skeletonDataFile.c_str());
     CCASSERT(skeletonData, binary->error ? binary->error : "Error reading skeleton data file.");
     spSkeletonBinary_dispose(binary);
-    
+    _ownsSkeleton = true;
     setSkeletonData(skeletonData, true);
     
     initialize();
@@ -168,7 +249,7 @@ void SkeletonRenderer::initWithBinaryFile (const std::string& skeletonDataFile, 
     spSkeletonData* skeletonData = spSkeletonBinary_readSkeletonDataFile(binary, skeletonDataFile.c_str());
     CCASSERT(skeletonData, binary->error ? binary->error : "Error reading skeleton data file.");
     spSkeletonBinary_dispose(binary);
-    
+    _ownsSkeleton = true;
     setSkeletonData(skeletonData, true);
     
     initialize();
@@ -177,7 +258,7 @@ void SkeletonRenderer::initWithBinaryFile (const std::string& skeletonDataFile, 
 
 void SkeletonRenderer::update (float deltaTime) {
 	Node::update(deltaTime);
-	spSkeleton_update(_skeleton, deltaTime * _timeScale);
+	if (_ownsSkeleton) spSkeleton_update(_skeleton, deltaTime * _timeScale);
 }
 
 void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t transformFlags) {
@@ -195,11 +276,30 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 	
     Color4F color;
 	Color4F darkColor;
+	float darkPremultipliedAlpha = _premultipliedAlpha ? 255 : 0;
 	AttachmentVertices* attachmentVertices = nullptr;
 	TwoColorTrianglesCommand* lastTwoColorTrianglesCommand = nullptr;
-	for (int i = 0, n = _skeleton->slotsCount; i < n; ++i) {
+	bool inRange = _startSlotIndex != -1 || _endSlotIndex != -1 ? false : true;
+	for (int i = 0, n = _skeleton->slotsCount; i < n; ++i) {		
 		spSlot* slot = _skeleton->drawOrder[i];
-		if (!slot->attachment) continue;
+		
+		if (_startSlotIndex >= 0 && _startSlotIndex == slot->data->index) {
+			inRange = true;
+		}
+		
+		if (!inRange) {
+			spSkeletonClipping_clipEnd(_clipper, slot);
+			continue;
+		}
+		
+		if (_endSlotIndex >= 0 && _endSlotIndex == slot->data->index) {
+			inRange = false;
+		}
+		
+		if (!slot->attachment) {
+			spSkeletonClipping_clipEnd(_clipper, slot);
+			continue;
+		}
 		
 		cocos2d::TrianglesCommand::Triangles triangles;
 		TwoColorTriangles trianglesTwoColor;
@@ -266,8 +366,10 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 		case SP_ATTACHMENT_CLIPPING: {
 			spClippingAttachment* clip = (spClippingAttachment*)slot->attachment;
 			spSkeletonClipping_clipStart(_clipper, slot, clip);
+			continue;
 		}
 		default:
+			spSkeletonClipping_clipEnd(_clipper, slot);
 			continue;
 		}
 		
@@ -280,6 +382,7 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 			darkColor.g = 0;
 			darkColor.b = 0;
 		}
+		darkColor.a = darkPremultipliedAlpha;
 		
 		color.a *= nodeColor.a * _skeleton->color.a * slot->color.a * 255;
 		// skip rendering if the color of this attachment is 0
@@ -445,7 +548,7 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 						vertex->color2.r = (GLubyte)(darkCopy.r * 255);
 						vertex->color2.g = (GLubyte)(darkCopy.g * 255);
 						vertex->color2.b = (GLubyte)(darkCopy.b * 255);
-						vertex->color2.a = 1;
+						vertex->color2.a = (GLubyte)darkColor.a;
 					}
 				} else {
 					for (int v = 0, vn = batchedTriangles->getTriangles().vertCount, vv = 0; v < vn; ++v, vv += 2) {
@@ -461,7 +564,7 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 						vertex->color2.r = (GLubyte)darkColor.r;
 						vertex->color2.g = (GLubyte)darkColor.g;
 						vertex->color2.b = (GLubyte)darkColor.b;
-						vertex->color2.a = 1;
+						vertex->color2.a = (GLubyte)darkColor.a;
 					}
 				}
 			} else {
@@ -491,7 +594,7 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 						vertex->color2.r = (GLubyte)(darkCopy.r * 255);
 						vertex->color2.g = (GLubyte)(darkCopy.g * 255);
 						vertex->color2.b = (GLubyte)(darkCopy.b * 255);
-						vertex->color2.a = 1;
+						vertex->color2.a = (GLubyte)darkColor.a;
 					}
 				} else {
 					for (int v = 0, vn = batchedTriangles->getTriangles().vertCount; v < vn; ++v) {
@@ -503,7 +606,7 @@ void SkeletonRenderer::draw (Renderer* renderer, const Mat4& transform, uint32_t
 						vertex->color2.r = (GLubyte)darkColor.r;
 						vertex->color2.g = (GLubyte)darkColor.g;
 						vertex->color2.b = (GLubyte)darkColor.b;
-						vertex->color2.a = 1;
+						vertex->color2.a = (GLubyte)darkColor.a;
 					}
 				}
 			}
@@ -574,11 +677,11 @@ void SkeletonRenderer::drawDebug (Renderer* renderer, const Mat4 &transform, uin
             spSlot* slot = _skeleton->drawOrder[i];
             if (!slot->attachment || slot->attachment->type != SP_ATTACHMENT_REGION) continue;
             spRegionAttachment* attachment = (spRegionAttachment*)slot->attachment;
-            spRegionAttachment_computeWorldVertices(attachment, slot->bone, _worldVertices, 0, 2);
-            points[0] = Vec2(_worldVertices[0], _worldVertices[1]);
-            points[1] = Vec2(_worldVertices[2], _worldVertices[3]);
-            points[2] = Vec2(_worldVertices[4], _worldVertices[5]);
-            points[3] = Vec2(_worldVertices[6], _worldVertices[7]);
+            spRegionAttachment_computeWorldVertices(attachment, slot->bone, worldVertices, 0, 2);
+            points[0] = Vec2(worldVertices[0], worldVertices[1]);
+            points[1] = Vec2(worldVertices[2], worldVertices[3]);
+            points[2] = Vec2(worldVertices[4], worldVertices[5]);
+            points[3] = Vec2(worldVertices[6], worldVertices[7]);
             drawNode->drawPoly(points, 4, true, Color4F::BLUE);
         }
     }
@@ -606,12 +709,13 @@ void SkeletonRenderer::drawDebug (Renderer* renderer, const Mat4 &transform, uin
 		for (int i = 0, n = _skeleton->slotsCount; i < n; ++i) {
 			spSlot* slot = _skeleton->drawOrder[i];
 			if (!slot->attachment || slot->attachment->type != SP_ATTACHMENT_MESH) continue;
-			spMeshAttachment* attachment = (spMeshAttachment*)slot->attachment;			
-			spVertexAttachment_computeWorldVertices(SUPER(attachment), slot, 0, attachment->super.worldVerticesLength, _worldVertices, 0, 2);
+			spMeshAttachment* attachment = (spMeshAttachment*)slot->attachment;
+			ensureWorldVerticesCapacity(attachment->super.worldVerticesLength);
+			spVertexAttachment_computeWorldVertices(SUPER(attachment), slot, 0, attachment->super.worldVerticesLength, worldVertices, 0, 2);
 			for (int ii = 0; ii < attachment->trianglesCount;) {
-				Vec2 v1(_worldVertices + (attachment->triangles[ii++] * 2));
-				Vec2 v2(_worldVertices + (attachment->triangles[ii++] * 2));
-				Vec2 v3(_worldVertices + (attachment->triangles[ii++] * 2));
+				Vec2 v1(worldVertices + (attachment->triangles[ii++] * 2));
+				Vec2 v2(worldVertices + (attachment->triangles[ii++] * 2));
+				Vec2 v3(worldVertices + (attachment->triangles[ii++] * 2));
 				drawNode->drawLine(v1, v2, Color4F::YELLOW);
 				drawNode->drawLine(v2, v3, Color4F::YELLOW);
 				drawNode->drawLine(v3, v1, Color4F::YELLOW);
@@ -641,16 +745,17 @@ Rect SkeletonRenderer::getBoundingBox () const {
 		int verticesCount;
 		if (slot->attachment->type == SP_ATTACHMENT_REGION) {
 			spRegionAttachment* attachment = (spRegionAttachment*)slot->attachment;
-			spRegionAttachment_computeWorldVertices(attachment, slot->bone, _worldVertices, 0, 2);
+			spRegionAttachment_computeWorldVertices(attachment, slot->bone, worldVertices, 0, 2);
 			verticesCount = 8;
 		} else if (slot->attachment->type == SP_ATTACHMENT_MESH) {
 			spMeshAttachment* mesh = (spMeshAttachment*)slot->attachment;
-			spVertexAttachment_computeWorldVertices(SUPER(mesh), slot, 0, mesh->super.worldVerticesLength, _worldVertices, 0, 2);
+			ensureWorldVerticesCapacity(mesh->super.worldVerticesLength);
+			spVertexAttachment_computeWorldVertices(SUPER(mesh), slot, 0, mesh->super.worldVerticesLength, worldVertices, 0, 2);
 			verticesCount = mesh->super.worldVerticesLength;
 		} else
 			continue;
 		for (int ii = 0; ii < verticesCount; ii += 2) {
-			float x = _worldVertices[ii] * scaleX, y = _worldVertices[ii + 1] * scaleY;
+			float x = worldVertices[ii] * scaleX, y = worldVertices[ii + 1] * scaleY;
 			minX = min(minX, x);
 			minY = min(minY, y);
 			maxX = max(maxX, x);
@@ -704,10 +809,7 @@ bool SkeletonRenderer::setAttachment (const std::string& slotName, const char* a
 }
 	
 void SkeletonRenderer::setTwoColorTint(bool enabled) {
-	if (enabled)
-		setGLProgramState(SkeletonTwoColorBatch::getInstance()->getTwoColorTintProgramState());
-	else
-		setGLProgramState(GLProgramState::getOrCreateWithGLProgramName(GLProgram::SHADER_NAME_POSITION_TEXTURE_COLOR_NO_MVP));
+	setupGLProgramState(enabled);
 }
 
 bool SkeletonRenderer::isTwoColorTint() {
@@ -716,6 +818,11 @@ bool SkeletonRenderer::isTwoColorTint() {
 	
 void SkeletonRenderer::setVertexEffect(spVertexEffect *effect) {
 	this->_effect = effect;
+}
+	
+void SkeletonRenderer::setSlotsRange(int startSlotIndex, int endSlotIndex) {
+	this->_startSlotIndex = startSlotIndex;
+	this->_endSlotIndex = endSlotIndex;
 }
 
 spSkeleton* SkeletonRenderer::getSkeleton () {
